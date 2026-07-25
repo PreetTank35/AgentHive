@@ -1,0 +1,45 @@
+# Web framework
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.0
+python-multipart>=0.0.12
+
+# Database (SQLAlchemy ORM → Supabase Postgres)
+sqlalchemy>=2.0.35
+psycopg2-binary>=2.9.9
+
+# Supabase (Auth + realtime client)
+supabase>=2.0.0
+
+# LLM / Agent orchestration
+langchain-openai>=0.3.0
+langchain-core>=0.3.28
+langgraph>=0.2.60
+
+# Auth (fallback when Supabase is not configured)
+pyjwt>=2.9.0
+passlib[bcrypt]>=1.7.4
+
+# Config
+python-dotenv>=1.0.1
+pydantic-settings>=2.6.0
+pydantic>=2.9.0
+
+# RAG Vector Search & Embeddings
+sentence-transformers>=2.2.2
+faiss-cpu>=1.7.4
+numpy>=1.24.0
+scikit-learn>=1.5.0
+
+# HTTP client
+httpx>=0.28.0
+
+# Google Calendar integration (OAuth 2.0 per-user)
+google-api-python-client>=2.140.0
+google-auth>=2.34.0
+google-auth-oauthlib>=1.2.0
+
+# WhatsApp (Twilio sandbox path)
+twilio>=9.0.0
+
+# Razorpay integration
+razorpay>=1.4.2
