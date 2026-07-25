@@ -58,26 +58,44 @@ def get_llm(
 ) -> ChatOpenAI:
     """Return a configured ChatOpenAI instance pointing at the LLM API.
 
-    Dynamically resolves the API key (GEMINI_API_KEY > OPENROUTER_API_KEY > OPENAI_API_KEY)
-    and base URL at invocation time for cloud serverless compatibility.
+    Supports direct Google Gemini API (Google AI Studio) as well as OpenRouter.
+    Automatically formats base_url and model name depending on provider.
     """
     api_key = get_api_key()
-    base_url = settings.GEMINI_BASE_URL or settings.OPENROUTER_BASE_URL or "https://openrouter.ai/api/v1"
-    model = settings.LLM_MODEL or "google/gemini-2.5-flash"
+
+    # Determine default base URL & model based on key provider
+    if api_key.startswith("sk-or-v1-"):
+        default_base_url = "https://openrouter.ai/api/v1"
+        default_model = "google/gemini-2.5-flash"
+    else:
+        # Direct Google Gemini API OpenAI-compatible endpoint
+        default_base_url = "https://generativelanguage.googleapis.com/v1beta/openai/"
+        default_model = "gemini-1.5-flash"
+
+    base_url = settings.GEMINI_BASE_URL or settings.OPENROUTER_BASE_URL or default_base_url
+    model = settings.LLM_MODEL or default_model
+
+    # If using Google direct endpoint and model starts with 'google/', strip prefix
+    if "generativelanguage.googleapis.com" in base_url and model.startswith("google/"):
+        model = model.replace("google/", "", 1)
 
     if not api_key:
         logger.error("No LLM API key provided. Set GEMINI_API_KEY, OPENROUTER_API_KEY, or OPENAI_API_KEY.")
 
+    headers = {}
+    if "openrouter.ai" in base_url:
+        headers = {
+            "HTTP-Referer": "https://agenthive.app",
+            "X-Title": "AgentHive",
+        }
+
     return ChatOpenAI(
         base_url=base_url,
-        api_key=api_key,
+        api_key=api_key or "placeholder",
         model=model,
         temperature=temperature,
         max_tokens=max_tokens or 1024,
         max_retries=2,
         timeout=120,
-        default_headers={
-            "HTTP-Referer": "https://agenthive.app",
-            "X-Title": "AgentHive",
-        },
+        default_headers=headers if headers else None,
     )
