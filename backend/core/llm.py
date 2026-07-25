@@ -47,27 +47,31 @@ if not _RESOLVED_API_KEY:
     )
 
 
+def get_api_key() -> str:
+    """Return the first non-empty API key from environment settings."""
+    return settings.GEMINI_API_KEY or settings.OPENROUTER_API_KEY or settings.OPENAI_API_KEY or ""
+
+
 def get_llm(
     temperature: float = 0.3,
     max_tokens: Optional[int] = None,
 ) -> ChatOpenAI:
     """Return a configured ChatOpenAI instance pointing at the LLM API.
 
-    Uses the resolved API key (GEMINI_API_KEY preferred over OPENROUTER_API_KEY)
-    and base URL. This ensures the valid .env key is used even when a stale
-    OS-level environment variable overrides one of the settings.
-
-    Args:
-        temperature: Sampling temperature (0.0 = deterministic, 1.0 = creative).
-        max_tokens: Maximum tokens in the response. Defaults to 1024 if not set.
-
-    Returns:
-        A ChatOpenAI instance ready to invoke.
+    Dynamically resolves the API key (GEMINI_API_KEY > OPENROUTER_API_KEY > OPENAI_API_KEY)
+    and base URL at invocation time for cloud serverless compatibility.
     """
+    api_key = get_api_key()
+    base_url = settings.GEMINI_BASE_URL or settings.OPENROUTER_BASE_URL or "https://openrouter.ai/api/v1"
+    model = settings.LLM_MODEL or "google/gemini-2.5-flash"
+
+    if not api_key:
+        logger.error("No LLM API key provided. Set GEMINI_API_KEY, OPENROUTER_API_KEY, or OPENAI_API_KEY.")
+
     return ChatOpenAI(
-        base_url=_RESOLVED_BASE_URL,
-        api_key=_RESOLVED_API_KEY,
-        model=_RESOLVED_MODEL,
+        base_url=base_url,
+        api_key=api_key,
+        model=model,
         temperature=temperature,
         max_tokens=max_tokens or 1024,
         max_retries=2,

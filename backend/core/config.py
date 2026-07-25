@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     # ── LLM (Gemini via OpenRouter or direct) ─────────────────
     GEMINI_API_KEY: str = ""
     OPENROUTER_API_KEY: str = ""
+    OPENAI_API_KEY: str = ""
     LLM_MODEL: str = "google/gemini-2.5-flash"
     GEMINI_BASE_URL: str = "https://openrouter.ai/api/v1"
     OPENROUTER_BASE_URL: str = "https://openrouter.ai/api/v1"
