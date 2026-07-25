@@ -3,12 +3,13 @@ Database engine, session management, and Supabase client.
 
 Uses SQLAlchemy ORM connected to Supabase PostgreSQL for all data operations.
 Also initializes a supabase-py client for Supabase Auth operations.
-Falls back to SQLite if the Postgres driver is unavailable (local dev).
+Falls back to SQLite if the Postgres driver is unavailable (local dev / serverless).
 """
 
 from __future__ import annotations
 
 import logging
+import os
 from typing import Generator
 
 from sqlalchemy import create_engine
@@ -23,6 +24,11 @@ logger = logging.getLogger("agenthive.database")
 db_url = settings.SUPABASE_DB_URL.strip()
 if db_url.startswith("postgres://"):
     db_url = db_url.replace("postgres://", "postgresql://", 1)
+
+# On Vercel Serverless, root filesystem is read-only.
+# If using SQLite fallback, redirect to /tmp/agenthive.db
+if os.getenv("VERCEL") and db_url.startswith("sqlite"):
+    db_url = "sqlite:////tmp/agenthive.db"
 
 try:
     if db_url.startswith("sqlite"):

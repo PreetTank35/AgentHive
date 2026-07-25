@@ -1,0 +1,17 @@
+# Ignore local environments, node_modules, and databases from Vercel function bundling
+.venv/
+venv/
+ENV/
+env/
+node_modules/
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+*.db
+agenthive.db
+.git/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.log
