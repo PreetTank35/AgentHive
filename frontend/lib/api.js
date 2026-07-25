@@ -8,7 +8,7 @@
 
 import { getToken } from './auth'
 
-const BASE = '/api'
+const BASE = (process.env.NEXT_PUBLIC_API_URL || '').replace(/\/$/, '') || '/api'
 
 /**
  * Build headers with optional auth token.
@@ -193,7 +193,8 @@ export async function fetchHiredAgents(userId = 1) {
  */
 export async function checkBackendHealth() {
   try {
-    const res = await fetch('/health')
+    const healthUrl = BASE.endsWith('/api') ? BASE.replace(/\/api$/, '/health') : `${BASE}/health`
+    const res = await fetch(healthUrl)
     return res.ok
   } catch {
     return false

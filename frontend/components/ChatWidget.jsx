@@ -198,12 +198,17 @@ export default function ChatWidget({ onNewActivity, initialAgent = 'auto', fullH
       // Notify parent to refresh activity feed
       if (onNewActivity) onNewActivity()
     } catch (err) {
-      // Surface the real error instead of disguising it as a successful response
+      // Surface helpful error context for local vs Vercel production
+      const isProduction = typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1'
+      const errorMessage = isProduction
+        ? `⚠️ **Connection Error** — Could not reach the backend server.\n\n**Error:** ${err.message}\n\n**How to fix on Vercel:**\n1. Go to **Vercel Dashboard → Project Settings → Environment Variables**.\n2. Add **NEXT_PUBLIC_API_URL** or **BACKEND_URL** pointing to your deployed backend URL (e.g. \`https://your-backend.onrender.com\`).\n3. Redeploy your Vercel project.`
+        : `⚠️ **Connection Error** — Could not reach the backend server.\n\n**Error:** ${err.message}\n\nPlease make sure the backend (uvicorn) is running on port 8000 (\`uvicorn backend.core.app:app --reload\`).`
+
       setMessages(prev => [
         ...prev,
         {
           role: 'assistant',
-          content: `⚠️ **Connection Error** — Could not reach the backend server.\n\n**Error:** ${err.message}\n\nPlease make sure the backend (uvicorn) is running on port 8000.`,
+          content: errorMessage,
           agent_name: 'manager',
           orchestrator: 'Error — Backend Unreachable',
         },

@@ -163,7 +163,7 @@ export default function AuthForm() {
       {/* Backend connection hint */}
       <div className="mt-6 p-3 rounded-xl bg-slate-50 border border-slate-100 text-center">
         <p className="text-[11px] text-slate-400">
-          🔗 Connects to AgentHive backend at <code className="text-slate-500">localhost:8000</code>
+          🔗 Connects to AgentHive backend at <code className="text-slate-500">{process.env.NEXT_PUBLIC_API_URL || 'localhost:8000'}</code>
         </p>
       </div>
 
