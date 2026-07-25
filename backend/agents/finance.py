@@ -1,7 +1,7 @@
 """
 Finance Agent — logs expenses, creates invoices, summarises spending.
 
-Makes real Claude API calls via OpenRouter with tool-use for DB operations.
+Uses LLM API calls with tool-use for DB operations.
 """
 
 from __future__ import annotations
@@ -20,14 +20,24 @@ from backend.integrations.payments import create_payment_link
 
 logger = logging.getLogger("agenthive.agents.finance")
 
-FINANCE_SYSTEM_PROMPT = """You are the Finance Agent for Sunrise Bakery, a small bakery business.
-You help the owner manage expenses, create invoices, and understand their finances.
+FINANCE_SYSTEM_PROMPT = """You are HIVE — the intelligent AI assistant powering AgentHive for Sunrise Bakery.
 
-You have the following tools available. ALWAYS use them when the user asks to log, create, list, or summarise financial data.
-Be friendly, professional, and concise. After performing an action, confirm what you did.
-If the user's message is ambiguous about the amount, category, or description, make a reasonable assumption and state it clearly.
+Think of yourself like JARVIS managing Tony Stark's finances — sharp, efficient, and always in control.
+When Tony says "I spent $85 on flour", JARVIS logs it instantly and confirms naturally. That's you.
 
-Common expense categories: ingredients, supplies, rent, utilities, marketing, equipment, wages, other.
+## Your Personality:
+- Confident and efficient — handle money matters like a pro
+- Conversational — "Got it, logged $85 for organic flour under ingredients!" not "Expense logged successfully. ID: 47."
+- If someone is just chatting, respond naturally without forcing financial operations
+- When reporting finances, make it digestible — highlight what matters, skip the noise
+- Light humor is welcome — "Your flour budget is rising faster than your sourdough! 🍞"
+
+## Rules:
+1. Use your tools to log expenses, create invoices, list expenses, or summarize spending
+2. After performing an action, confirm in plain English what you did
+3. If amounts/categories are ambiguous, make reasonable assumptions and state them
+4. NEVER respond with raw JSON or database IDs — always speak naturally
+5. Common expense categories: ingredients, supplies, rent, utilities, marketing, equipment, wages, other
 """
 
 # ── Tool definitions (OpenAI function-calling format) ────────
@@ -274,7 +284,7 @@ def _get_expense_summary(user_id: int, days: int = 30) -> str:
 
 # ── Tool dispatcher ──────────────────────────────────────────
 
-def _create_payment_link(user_id: int, amount_rupees: float, description: str, customer_name: str, customer_phone: str = "") -> str:
+def _create_payment_link_tool(user_id: int, amount_rupees: float, description: str, customer_name: str, customer_phone: str = "") -> str:
     """Wrapper so the Razorpay integration fits the same tool-call pattern as the DB tools.
 
     Args:
@@ -301,7 +311,7 @@ TOOL_MAP = {
     "list_expenses": _list_expenses,
     "create_invoice": _create_invoice,
     "get_expense_summary": _get_expense_summary,
-    "create_payment_link": _create_payment_link,
+    "create_payment_link": _create_payment_link_tool,
 }
 
 
@@ -323,19 +333,19 @@ def _execute_tool(tool_name: str, args: dict[str, Any], user_id: int) -> str:
 
 
 def _fallback_finance_handler(state: AgentState, error_msg: str = "") -> dict:
-    """Deterministic rule-based fallback handler when LLM API fails."""
+    """Natural fallback handler when LLM API fails — still tries to help."""
     import re
     user_id = state.get("user_id", 1)
     user_text = state["messages"][-1].content if state.get("messages") else ""
     lower = user_text.lower()
 
-    logger.warning("Finance LLM call failed (%s) — running deterministic rule-based fallback", error_msg)
+    logger.warning("Finance LLM call failed (%s) — running fallback", error_msg)
 
     # 1. Log expense intent
     amount_match = re.search(r"\$(\d+(?:\.\d+)?)|(\d+(?:\.\d+)?)\s*(?:dollars?|usd)", lower)
     if amount_match or any(k in lower for k in ["log", "spent", "bought", "cost", "paid", "expense"]):
         amount = float(amount_match.group(1) or amount_match.group(2)) if amount_match else 25.0
-        
+
         category = "other"
         categories = ["ingredients", "supplies", "rent", "utilities", "marketing", "equipment", "wages"]
         for cat in categories:
@@ -350,12 +360,10 @@ def _fallback_finance_handler(state: AgentState, error_msg: str = "") -> dict:
             elif any(k in lower for k in ["ad", "flyer", "social", "promo"]):
                 category = "marketing"
 
-        # Extract description or use full text
         clean_desc = re.sub(r"log\s+(?:a\s+)?", "", user_text, flags=re.IGNORECASE).strip()
-        result_json = _log_expense(user_id=user_id, amount=amount, category=category, description=clean_desc)
-        return {
-            "messages": [AIMessage(content=f"✅ **Expense Logged Successfully!**\n\n- **Amount:** ${amount:.2f}\n- **Category:** {category.capitalize()}\n- **Description:** {clean_desc}\n\n*Note: Logged via Finance Agent fallback engine.*", name="finance")],
-        }
+        _log_expense(user_id=user_id, amount=amount, category=category, description=clean_desc)
+        msg = f"Got it! ✅ Logged ${amount:.2f} under **{category}** — \"{clean_desc}\". Your books are up to date!"
+        return {"messages": [AIMessage(content=msg, name="finance")]}
 
     # 2. List expenses intent
     if any(k in lower for k in ["list", "show", "recent", "view", "history", "all"]):
@@ -363,23 +371,30 @@ def _fallback_finance_handler(state: AgentState, error_msg: str = "") -> dict:
         data = json.loads(res_raw)
         expenses = data.get("expenses", [])
         if not expenses:
-            msg = "No recent expenses found in the last 30 days."
+            msg = "Looks like a clean slate! No expenses recorded in the last 30 days. 📝"
         else:
-            lines = [f"📊 **Recent Expenses (Last 30 Days):**\n"]
-            for e in expenses[:10]:
-                lines.append(f"• **${e['amount']:.2f}** — {e['description']} (*{e['category']}*)")
+            total = data.get("total", 0)
+            lines = [f"Here's your spending for the last 30 days (${total:.2f} total):\n"]
+            for e in expenses[:8]:
+                lines.append(f"• **${e['amount']:.2f}** — {e['description']} ({e['category']})")
+            if len(expenses) > 8:
+                lines.append(f"\n...and {len(expenses) - 8} more transactions.")
             msg = "\n".join(lines)
         return {"messages": [AIMessage(content=msg, name="finance")]}
 
-    # 3. Expense summary / report intent
+    # 3. Default: expense summary
     res_raw = _get_expense_summary(user_id=user_id, days=30)
     data = json.loads(res_raw)
     total = data.get("grand_total", 0.0)
-    cats = data.get("categories", {})
-    lines = [f"💰 **Financial Overview (Last 30 Days):**\n", f"**Total Spending:** ${total:.2f}\n", "**Breakdown by Category:**"]
-    for cat, amt in cats.items():
-        lines.append(f"• **{cat.capitalize()}:** ${amt:.2f}")
-    return {"messages": [AIMessage(content="\n".join(lines), name="finance")]}
+    cats = data.get("by_category", {})
+    if not cats:
+        msg = "No financial data to report yet. Start logging some expenses and I'll keep track of everything for you! 💰"
+    else:
+        lines = [f"💰 Here's your 30-day financial snapshot — **${total:.2f}** total spending:\n"]
+        for cat, amt in cats.items():
+            lines.append(f"• **{cat.capitalize()}:** ${amt:.2f}")
+        msg = "\n".join(lines)
+    return {"messages": [AIMessage(content=msg, name="finance")]}
 
 
 # ── LangGraph node ───────────────────────────────────────────
@@ -387,9 +402,12 @@ def _fallback_finance_handler(state: AgentState, error_msg: str = "") -> dict:
 def finance_node(state: AgentState) -> dict:
     """Finance specialist agent node for the LangGraph.
 
-    Runs a tool-calling loop: sends the user message + tools to Claude,
+    Runs a tool-calling loop: sends the user message + tools to the LLM,
     executes any requested tools, feeds results back, repeats until
     the LLM produces a final text response.
+
+    Uses bind_tools() instead of passing tools= to invoke() to avoid
+    TypeError with ChatOpenAI.
 
     Args:
         state: Current graph state.
@@ -405,11 +423,15 @@ def finance_node(state: AgentState) -> dict:
         conversation.append(msg)
 
     try:
-        llm = get_llm(temperature=0.3)
+        llm = get_llm(temperature=0.3, max_tokens=500)
+
+        # CRITICAL FIX: Use bind_tools() instead of passing tools= to invoke()
+        # ChatOpenAI.invoke() does NOT accept tools= as a kwarg — it throws TypeError
+        llm_with_tools = llm.bind_tools(FINANCE_TOOLS)
 
         # Tool-calling loop (max 5 iterations to prevent runaway)
         for _ in range(5):
-            response = llm.invoke(conversation, tools=FINANCE_TOOLS)
+            response = llm_with_tools.invoke(conversation)
 
             if not response.tool_calls:
                 # Final text response
@@ -424,7 +446,7 @@ def finance_node(state: AgentState) -> dict:
                 conversation.append(ToolMessage(content=result, tool_call_id=tc["id"]))
 
         return {
-            "messages": [AIMessage(content="I've processed your financial request. Let me know if you need anything else!", name="finance")],
+            "messages": [AIMessage(content="All done! Your financial records are up to date. Need anything else?", name="finance")],
         }
     except Exception as e:
         return _fallback_finance_handler(state, str(e))

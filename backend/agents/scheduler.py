@@ -1,7 +1,7 @@
 """
 Scheduler Agent — creates reminders, schedules meetings, lists upcoming events.
 
-Makes real LLM API calls via OpenRouter with tool-use for DB operations
+Uses LLM API calls with tool-use for DB operations
 and Google Calendar (OAuth per-user).
 """
 
@@ -21,25 +21,25 @@ from backend.integrations.calendar import create_calendar_event, list_calendar_e
 
 logger = logging.getLogger("agenthive.agents.scheduler")
 
-SCHEDULER_SYSTEM_PROMPT = """You are the Scheduler Agent for Sunrise Bakery, a small bakery business.
-You help the owner manage their time: creating reminders, scheduling meetings, and tracking upcoming events.
+SCHEDULER_SYSTEM_PROMPT = """You are HIVE — the intelligent AI assistant powering AgentHive for Sunrise Bakery.
 
-You have tools to create, list, and complete reminders, create real events on Google Calendar,
-and list upcoming calendar events.
+Think of yourself like JARVIS managing Tony Stark's schedule — precise, reliable, and always ahead of time.
+When Tony says "remind me to order flour tomorrow", JARVIS handles it instantly with a confirmation. That's you.
 
-Use create_calendar_event when the user wants an actual meeting on their calendar (not just an internal reminder).
-Use list_calendar_events when the user wants to see what's coming up on their calendar.
-ALWAYS use these tools when the user asks about scheduling.
+## Your Personality:
+- Efficient and dependable — time management is your domain
+- Conversational confirmations — "Done! I've set a reminder for tomorrow at 9 AM to order flour." not "Reminder created. ID: 12."
+- If someone is just chatting, respond naturally
+- When listing schedules, make it scannable and clear
+- Light humor welcome — "Looks like a busy week! Better brew some extra coffee ☕"
 
-When parsing dates from natural language:
-- "tomorrow" = next day
-- "next Monday" = the coming Monday
-- "in 3 days" = 3 days from now
-- If no time is specified, default to 9:00 AM
-- Always use ISO 8601 format (YYYY-MM-DDTHH:MM:SS) for the due_at parameter
-- The current date/time is provided in the conversation — use it as reference
-
-Be concise and confirm what you scheduled with the exact date/time.
+## Rules:
+1. Use tools to create/list/complete reminders and calendar events
+2. Parse natural language dates: "tomorrow" = next day, "next Monday" = coming Monday
+3. If no time is specified, default to 9:00 AM
+4. After scheduling, confirm the exact date/time in plain language
+5. NEVER respond with raw JSON or database IDs — always speak naturally
+6. Use create_calendar_event for actual meetings, create_reminder for internal tasks
 """
 
 SCHEDULER_TOOLS = [
@@ -285,14 +285,14 @@ def _execute_tool(tool_name: str, args: dict[str, Any], user_id: int) -> str:
 
 
 def _fallback_scheduler_handler(state: AgentState, error_msg: str = "") -> dict:
-    """Deterministic rule-based fallback handler when LLM API fails."""
+    """Natural fallback handler when LLM API fails."""
     import re
     from datetime import timedelta
     user_id = state.get("user_id", 1)
     user_text = state["messages"][-1].content if state.get("messages") else ""
     lower = user_text.lower()
 
-    logger.warning("Scheduler LLM call failed (%s) — running deterministic rule-based fallback", error_msg)
+    logger.warning("Scheduler LLM call failed (%s) — running fallback", error_msg)
 
     # 1. List reminders intent
     if any(k in lower for k in ["list", "show", "upcoming", "view", "reminders"]):
@@ -300,19 +300,19 @@ def _fallback_scheduler_handler(state: AgentState, error_msg: str = "") -> dict:
         data = json.loads(res_raw)
         reminders = data.get("reminders", [])
         if not reminders:
-            msg = "📅 No upcoming reminders found in your schedule."
+            msg = "Your schedule is clear! No upcoming reminders at the moment. 📅"
         else:
-            lines = ["📅 **Upcoming Scheduled Reminders:**\n"]
+            lines = ["Here's what's coming up:\n"]
             for r in reminders:
                 due_str = r['due_at'][:16].replace('T', ' ') if r.get('due_at') else "Soon"
-                lines.append(f"• **{r['title']}** — Due: {due_str}")
+                lines.append(f"• **{r['title']}** — {due_str}")
             msg = "\n".join(lines)
         return {"messages": [AIMessage(content=msg, name="scheduler")]}
 
     # 2. Create reminder intent
     title = re.sub(r"remind\s+(?:me\s+)?(?:to\s+)?", "", user_text, flags=re.IGNORECASE).strip()
     if not title:
-        title = "Bakery Reminder Task"
+        title = "Bakery Task"
 
     now = datetime.now(timezone.utc)
     due = now + timedelta(days=1)
@@ -325,18 +325,16 @@ def _fallback_scheduler_handler(state: AgentState, error_msg: str = "") -> dict:
 
     _create_reminder(user_id=user_id, title=title.capitalize(), due_at=due.isoformat(), description=user_text)
 
-    due_formatted = due.strftime("%Y-%m-%d %H:%M UTC")
-    msg = (
-        f"📅 **Reminder Scheduled Successfully!**\n\n"
-        f"- **Task:** {title.capitalize()}\n"
-        f"- **Due Date/Time:** {due_formatted}\n\n"
-        f"*(Saved to DB & Activity Feed)*"
-    )
+    due_formatted = due.strftime("%B %d at %I:%M %p")
+    msg = f"Done! ✅ I've set a reminder for **{title.capitalize()}** on **{due_formatted}**. I'll make sure you don't forget!"
     return {"messages": [AIMessage(content=msg, name="scheduler")]}
 
 
 def scheduler_node(state: AgentState) -> dict:
     """Scheduler specialist agent node for the LangGraph.
+
+    Uses bind_tools() instead of passing tools= to invoke() to avoid
+    TypeError with ChatOpenAI.
 
     Args:
         state: Current graph state.
@@ -353,10 +351,13 @@ def scheduler_node(state: AgentState) -> dict:
         conversation.append(msg)
 
     try:
-        llm = get_llm(temperature=0.2)
+        llm = get_llm(temperature=0.2, max_tokens=500)
+
+        # CRITICAL FIX: Use bind_tools() instead of passing tools= to invoke()
+        llm_with_tools = llm.bind_tools(SCHEDULER_TOOLS)
 
         for _ in range(5):
-            response = llm.invoke(conversation, tools=SCHEDULER_TOOLS)
+            response = llm_with_tools.invoke(conversation)
             if not response.tool_calls:
                 return {"messages": [AIMessage(content=response.content, name="scheduler")]}
             conversation.append(response)
@@ -364,6 +365,6 @@ def scheduler_node(state: AgentState) -> dict:
                 result = _execute_tool(tc["name"], tc["args"], user_id)
                 conversation.append(ToolMessage(content=result, tool_call_id=tc["id"]))
 
-        return {"messages": [AIMessage(content="Your reminder has been set! Check the activity feed for details.", name="scheduler")]}
+        return {"messages": [AIMessage(content="All set! Your schedule has been updated. Need anything else?", name="scheduler")]}
     except Exception as e:
         return _fallback_scheduler_handler(state, str(e))

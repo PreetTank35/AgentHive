@@ -17,14 +17,24 @@ from backend.orchestration.state import AgentState
 
 logger = logging.getLogger("agenthive.agents.content")
 
-CONTENT_SYSTEM_PROMPT = """You are the Content Agent for Sunrise Bakery, a small bakery business.
-You help the owner create compelling content: social media posts, marketing emails, newsletters, and business proposals.
+CONTENT_SYSTEM_PROMPT = """You are HIVE — the intelligent AI assistant powering AgentHive for Sunrise Bakery.
 
-Style guidelines:
-- Friendly, warm, approachable tone that matches a local artisan bakery
-- Use emojis effectively for social posts
-- Emails should be professional but personable
-- Produce REAL, ready-to-use content (no placeholders like [Insert Date])
+Think of yourself like JARVIS from Iron Man — when Tony asks for a presentation or marketing brief,
+JARVIS delivers it with style, precision, and personality. That's you for content creation.
+
+## Your Personality:
+- Creative, confident, and polished — every piece of content should feel premium
+- Match the tone to the platform: casual & fun for Instagram, professional for emails, persuasive for proposals
+- Speak naturally — never use placeholder brackets like [Insert Date] or [Your Name]
+- If someone is just chatting, respond conversationally without forcing content creation
+- You're the bakery's creative director — own it
+
+## Content Guidelines:
+- Social posts: Fun, emoji-rich, engaging — make people crave bakery goods
+- Emails: Professional but warm, like a letter from a friend who happens to run a bakery
+- Proposals: Structured, persuasive, with clear value propositions
+- Always produce COMPLETE, ready-to-use content — no placeholders, no "fill in later"
+- Keep it concise and impactful — quality over length
 """
 
 
@@ -51,12 +61,12 @@ def _create_draft(user_id: int, content_type: str, subject: str, body: str) -> s
 
 
 def _fallback_content_handler(state: AgentState, error_msg: str = "") -> dict:
-    """Deterministic rule-based fallback handler when LLM API fails."""
+    """Natural fallback handler when LLM API fails."""
     user_id = state.get("user_id", 1)
     user_text = state["messages"][-1].content if state.get("messages") else ""
     lower = user_text.lower()
 
-    logger.warning("Content LLM call failed (%s) — running deterministic rule-based fallback", error_msg)
+    logger.warning("Content LLM call failed (%s) — running fallback", error_msg)
 
     content_type = "post"
     if "email" in lower:
@@ -89,12 +99,7 @@ def _fallback_content_handler(state: AgentState, error_msg: str = "") -> dict:
 
     _create_draft(user_id=user_id, content_type=content_type, subject=subject, body=body)
 
-    formatted_msg = (
-        f"📝 **Content Draft Created!**\n\n"
-        f"**Subject:** {subject}\n\n"
-        f"**Content:**\n{body}"
-    )
-    return {"messages": [AIMessage(content=formatted_msg, name="content")]}
+    return {"messages": [AIMessage(content=body, name="content")]}
 
 
 def content_node(state: AgentState) -> dict:
@@ -102,14 +107,15 @@ def content_node(state: AgentState) -> dict:
     user_id = state.get("user_id", 1)
     user_msg = state["messages"][-1].content if state.get("messages") else "Draft a post about sourdough bread"
 
-    prompt = f"""Task: Create content based on this request: "{user_msg}"
+    prompt = f"""The bakery owner says: "{user_msg}"
 
-Generate ready-to-use content (social post, email, or proposal).
-Format your response clearly with a Subject and Body.
+Create the content they're asking for. Deliver it ready-to-use — no placeholders, no "fill in later".
+Match the tone to the platform (fun for social, professional for email, persuasive for proposals).
+Just deliver the content directly — don't add meta-commentary about what you created.
 """
 
     try:
-        llm = get_llm(temperature=0.7, max_tokens=350)
+        llm = get_llm(temperature=0.7, max_tokens=500)
         response = llm.invoke([
             SystemMessage(content=CONTENT_SYSTEM_PROMPT),
             HumanMessage(content=prompt),

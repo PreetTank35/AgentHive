@@ -30,18 +30,27 @@ logger = logging.getLogger("agenthive.manager")
 
 def _fast_classify(text: str) -> str | None:
     """Instant heuristic classification (< 1ms execution time)."""
-    lower = text.lower()
+    lower = text.lower().strip()
+
+    # Casual greetings and small talk → support (which handles it conversationally)
+    casual_starts = [
+        "hi", "hello", "hey", "hie", "yo", "sup", "what's up", "whats up",
+        "how are you", "how's it going", "good morning", "good evening",
+        "good afternoon", "thanks", "thank you", "bye", "goodbye",
+    ]
+    if any(lower.startswith(p) or lower == p for p in casual_starts):
+        return "support"
 
     # Explicit delegation or direct keywords
-    if any(k in lower for k in ["customer support", "support agent", "help user", "queries", "faq", "opening hour", "hours", "delivery", "menu", "allergen", "open"]):
+    if any(k in lower for k in ["customer support", "support agent", "help user", "queries", "faq", "opening hour", "hours", "delivery", "menu", "allergen", "open", "located", "location", "address", "parking", "vegan", "gluten"]):
         return "support"
-    if any(k in lower for k in ["finance agent", "accounting agent", "expense", "invoice", "cost", "spent", "dollar", "$", "budget", "log expense"]):
+    if any(k in lower for k in ["finance agent", "accounting agent", "expense", "invoice", "cost", "spent", "dollar", "$", "budget", "log expense", "payment", "revenue", "profit"]):
         return "finance"
-    if any(k in lower for k in ["content agent", "marketing agent", "draft", "post", "social", "email", "newsletter", "proposal", "instagram", "facebook"]):
+    if any(k in lower for k in ["content agent", "marketing agent", "draft", "post", "social", "email", "newsletter", "proposal", "instagram", "facebook", "write", "compose", "blog"]):
         return "content"
-    if any(k in lower for k in ["scheduler agent", "calendar agent", "remind", "reminder", "schedule", "meeting", "calendar", "tomorrow", "monday"]):
+    if any(k in lower for k in ["scheduler agent", "calendar agent", "remind", "reminder", "schedule", "meeting", "calendar", "tomorrow", "monday", "appointment", "book"]):
         return "scheduler"
-    if any(k in lower for k in ["analytics agent", "reporting agent", "analytic", "summary", "report", "insight", "overview", "stat", "performance"]):
+    if any(k in lower for k in ["analytics agent", "reporting agent", "analytic", "summary", "report", "insight", "overview", "stat", "performance", "metrics", "dashboard", "how's the business", "how is the business"]):
         return "analytics"
 
     return None
@@ -61,7 +70,12 @@ def classify_intent(state: AgentState) -> AgentState:
     try:
         llm = get_llm(temperature=0.0, max_tokens=100)
         messages = [
-            SystemMessage(content="You route small business queries to: finance, content, scheduler, support, or analytics. Respond ONLY with JSON: {\"agent\": \"name\"}"),
+            SystemMessage(content=(
+                "You are the HIVE Manager — you route user messages to the right specialist agent. "
+                "Available agents: finance, content, scheduler, support, analytics. "
+                "If the message is casual chat/greeting, route to 'support'. "
+                "Respond ONLY with JSON: {\"agent\": \"name\"}"
+            )),
             HumanMessage(content=user_text),
         ]
         response = llm.invoke(messages)

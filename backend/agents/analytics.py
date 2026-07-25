@@ -17,18 +17,24 @@ from backend.orchestration.state import AgentState
 
 logger = logging.getLogger("agenthive.agents.analytics")
 
-ANALYTICS_SYSTEM_PROMPT = """You are the Analytics Agent for Sunrise Bakery, a small bakery business.
-You receive raw business metrics from the database and produce insightful, actionable executive reports.
+ANALYTICS_SYSTEM_PROMPT = """You are HIVE — the intelligent AI assistant powering AgentHive for Sunrise Bakery.
 
-Your reports should:
-- Highlight key financial trends and performance
-- Identify areas of concern or opportunity
-- Provide specific, practical recommendations
-- Use clear formatting with sections and bullet points
-- Be warm and encouraging, not just dry numbers
-- Use ₹ or $ depending on context, emojis to make it visually engaging
+Think of yourself like JARVIS giving Tony Stark a business briefing — sharp, insightful, and actionable.
+When Tony asks "how's the company doing?", JARVIS doesn't dump a spreadsheet — he gives a concise, 
+intelligent executive summary with key highlights and recommendations. That's you.
 
-Always end with 2-3 concrete, actionable recommendations based on the actual data provided.
+## Your Personality:
+- Executive-level insight delivery — lead with what matters most
+- Make numbers tell a story — don't just list them
+- Be encouraging but honest — highlight wins AND flag concerns
+- Use visual formatting (bold, bullets, emojis) to make reports scannable
+- End with 2-3 concrete, actionable recommendations based on actual data
+- If there's no data, say so honestly and suggest what to track
+
+## Tone:
+- Smart, confident, approachable
+- "Your ingredient costs are running 40% of total spend — that's healthy for a bakery, but I'd watch the flour budget." 
+- NOT "Total ingredients: $450.00. Total supplies: $120.00. Total rent: $800.00."
 """
 
 
@@ -158,15 +164,19 @@ def analytics_node(state: AgentState) -> dict:
 - Next Scheduled Item: {sch['next_due']}
 
 ### Customer Support:
-- Total Customer Inquiries: {sup['total_questions']}
+- Total Customer Inquiries: {sup['total_questions']} logged
 - Resolution Rate: {sup['resolution_rate']}% ({sup['resolved']} resolved, {sup['unresolved']} pending)
 
 ---
-User's specific question/request: {user_question}
+The bakery owner asks: "{user_question}"
+
+Analyze this data and give a JARVIS-style executive briefing. Lead with the most important insight.
+Make numbers tell a story. End with 2-3 actionable recommendations.
+If there's no data in a category, briefly acknowledge it and suggest what to start tracking.
 """
 
     try:
-        llm = get_llm(temperature=0.3, max_tokens=1200)
+        llm = get_llm(temperature=0.4, max_tokens=1200)
         response = llm.invoke([
             SystemMessage(content=ANALYTICS_SYSTEM_PROMPT),
             HumanMessage(content=metrics_context),
@@ -175,33 +185,40 @@ User's specific question/request: {user_question}
         return {"messages": [AIMessage(content=report, name="analytics")]}
 
     except Exception as e:
-        logger.error("Analytics LLM call failed: %s — falling back to structured report", e)
-        # Fallback: build the report directly from DB data
-        cat_lines = [f"  - **{cat.capitalize()}**: ${val:.2f}" for cat, val in exp.get("by_category", {}).items()]
-        top_exp = exp.get("top_expense")
-        top_desc = f"${top_exp['amount']:.2f} ({top_exp['description'] or top_exp['category']})" if top_exp else "N/A"
+        logger.error("Analytics LLM call failed: %s — generating fallback briefing", e)
+        # Fallback: build a natural-sounding report from DB data
+        total = exp['total_spent']
+        count = exp['expense_count']
 
-        report = f"""📊 **Executive Business Analytics — Sunrise Bakery**
+        if count == 0 and cnt['total_drafts'] == 0 and sup['total_questions'] == 0:
+            report = (
+                "📊 **Business Briefing**\n\n"
+                "Looks like we're just getting started! No data to report yet across finances, "
+                "content, or customer support. Start logging expenses, creating content drafts, "
+                "and fielding customer questions — I'll have a full briefing ready for you in no time!"
+            )
+        else:
+            parts = ["📊 **Business Briefing — Last 30 Days**\n"]
 
-💰 **Financial Performance (Last 30 Days):**
-- **Total Expenses:** ${exp['total_spent']:.2f} across {exp['expense_count']} transactions
-- **Average Per Expense:** ${exp['avg_per_expense']:.2f}
-- **Top Single Expense:** {top_desc}
-- **Category Breakdown:**
-{chr(10).join(cat_lines) if cat_lines else "  - No expenses recorded"}
+            if count > 0:
+                cats = exp.get('by_category', {})
+                top_cat = max(cats, key=cats.get) if cats else "N/A"
+                parts.append(f"💰 **Finances:** ${total:.2f} spent across {count} transactions. "
+                           f"Biggest category: **{top_cat.capitalize()}** (${cats.get(top_cat, 0):.2f}).")
 
-📝 **Content & Marketing Operations:**
-- **Total Drafts Created:** {cnt['total_drafts']} items
-- **By Type:** {json.dumps(cnt['by_type'])}
-- **Status:** {cnt['by_status'].get('draft', 0)} draft, {cnt['by_status'].get('published', 0)} published
+            if cnt['total_drafts'] > 0:
+                parts.append(f"\n📝 **Content:** {cnt['total_drafts']} drafts created. "
+                           f"Status: {cnt['by_status'].get('draft', 0)} in draft, "
+                           f"{cnt['by_status'].get('published', 0)} published.")
 
-📅 **Operations & Scheduling:**
-- **Total Reminders:** {sch['total_reminders']} ({sch['completion_rate']}% completion rate)
-- **Upcoming Tasks:** {sch['upcoming']}
-- **Next Key Task:** {sch['next_due']}
+            if sup['total_questions'] > 0:
+                parts.append(f"\n🎧 **Support:** {sup['total_questions']} customer inquiries handled. "
+                           f"Resolution rate: {sup['resolution_rate']}%.")
 
-🛟 **Customer Support:**
-- **Total Inquiries:** {sup['total_questions']} logged
-- **Resolution Rate:** {sup['resolution_rate']}% ({sup['resolved']} resolved, {sup['unresolved']} pending)
-"""
+            if sch['total_reminders'] > 0:
+                parts.append(f"\n📅 **Schedule:** {sch['upcoming']} upcoming tasks. "
+                           f"Completion rate: {sch['completion_rate']}%.")
+
+            report = "\n".join(parts)
+
         return {"messages": [AIMessage(content=report, name="analytics")]}
