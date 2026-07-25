@@ -1,6 +1,8 @@
 "use client"
 import { useState, useRef, useEffect, useCallback } from 'react'
-import { Send, Bot, User, Sparkles, ChevronDown, Check, Mic, MicOff, Volume2, VolumeX } from 'lucide-react'
+import { Send, Bot, User, Sparkles, ChevronDown, Check, Mic, MicOff, Volume2, VolumeX, Square, Play } from 'lucide-react'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import { sendChatMessage } from '@/lib/api'
 import { getUser } from '@/lib/auth'
 
@@ -12,6 +14,53 @@ const AGENT_OPTIONS = [
   { key: 'scheduler', name: 'Scheduler Agent', icon: '📅', color: '#F59E0B', role: 'Reminders & Meetings' },
   { key: 'analytics', name: 'Analytics Agent', icon: '📊', color: '#3B82F6', role: 'Business & Performance Insights' },
 ]
+
+/**
+ * Markdown renderer components — styles for rendered markdown inside chat bubbles.
+ * Each key maps to an HTML element that ReactMarkdown produces.
+ */
+const markdownComponents = {
+  p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
+  strong: ({ children }) => <strong className="font-bold text-slate-900">{children}</strong>,
+  em: ({ children }) => <em className="italic text-slate-700">{children}</em>,
+  h1: ({ children }) => <h1 className="text-lg font-extrabold text-slate-900 mb-2 mt-3 first:mt-0">{children}</h1>,
+  h2: ({ children }) => <h2 className="text-base font-bold text-slate-900 mb-1.5 mt-2.5 first:mt-0">{children}</h2>,
+  h3: ({ children }) => <h3 className="text-sm font-bold text-slate-800 mb-1 mt-2 first:mt-0">{children}</h3>,
+  ul: ({ children }) => <ul className="list-disc list-outside ml-5 mb-2 space-y-0.5">{children}</ul>,
+  ol: ({ children }) => <ol className="list-decimal list-outside ml-5 mb-2 space-y-0.5">{children}</ol>,
+  li: ({ children }) => <li className="text-sm leading-relaxed">{children}</li>,
+  code: ({ inline, children }) =>
+    inline
+      ? <code className="bg-slate-100 text-blue-700 px-1.5 py-0.5 rounded text-xs font-mono">{children}</code>
+      : <code className="block bg-slate-900 text-emerald-300 p-3 rounded-lg text-xs font-mono my-2 overflow-x-auto">{children}</code>,
+  pre: ({ children }) => <pre className="bg-slate-900 text-emerald-300 p-3 rounded-lg text-xs font-mono my-2 overflow-x-auto">{children}</pre>,
+  blockquote: ({ children }) => <blockquote className="border-l-3 border-blue-400 pl-3 my-2 text-slate-600 italic">{children}</blockquote>,
+  hr: () => <hr className="border-slate-200 my-3" />,
+  a: ({ href, children }) => <a href={href} target="_blank" rel="noopener noreferrer" className="text-blue-600 underline hover:text-blue-800">{children}</a>,
+  table: ({ children }) => <div className="overflow-x-auto my-2"><table className="min-w-full text-xs border border-slate-200 rounded-lg overflow-hidden">{children}</table></div>,
+  thead: ({ children }) => <thead className="bg-slate-100">{children}</thead>,
+  tbody: ({ children }) => <tbody className="divide-y divide-slate-100">{children}</tbody>,
+  tr: ({ children }) => <tr className="border-b border-slate-100">{children}</tr>,
+  th: ({ children }) => <th className="px-3 py-1.5 text-left font-bold text-slate-700">{children}</th>,
+  td: ({ children }) => <td className="px-3 py-1.5 text-slate-600">{children}</td>,
+}
+
+/**
+ * Markdown renderer for user messages — lighter styling on blue background.
+ */
+const userMarkdownComponents = {
+  ...markdownComponents,
+  strong: ({ children }) => <strong className="font-bold text-white">{children}</strong>,
+  em: ({ children }) => <em className="italic text-blue-100">{children}</em>,
+  h1: ({ children }) => <h1 className="text-lg font-extrabold text-white mb-2 mt-3 first:mt-0">{children}</h1>,
+  h2: ({ children }) => <h2 className="text-base font-bold text-white mb-1.5 mt-2.5 first:mt-0">{children}</h2>,
+  h3: ({ children }) => <h3 className="text-sm font-bold text-blue-100 mb-1 mt-2 first:mt-0">{children}</h3>,
+  code: ({ inline, children }) =>
+    inline
+      ? <code className="bg-blue-500/30 text-blue-100 px-1.5 py-0.5 rounded text-xs font-mono">{children}</code>
+      : <code className="block bg-blue-800/50 text-blue-100 p-3 rounded-lg text-xs font-mono my-2 overflow-x-auto">{children}</code>,
+  a: ({ href, children }) => <a href={href} target="_blank" rel="noopener noreferrer" className="text-blue-200 underline hover:text-white">{children}</a>,
+}
 
 /**
  * ChatWidget — Interactive multi-agent chat with voice support.
@@ -41,6 +90,7 @@ export default function ChatWidget({ onNewActivity, initialAgent = 'auto', fullH
   const [isListening, setIsListening] = useState(false)
   const [isSpeaking, setIsSpeaking] = useState(false)
   const [voiceEnabled, setVoiceEnabled] = useState(true) // auto-read responses aloud
+  const [speakingMsgIndex, setSpeakingMsgIndex] = useState(null) // which message is being read
   const recognitionRef = useRef(null)
 
   useEffect(() => {
@@ -108,8 +158,8 @@ export default function ChatWidget({ onNewActivity, initialAgent = 'auto', fullH
   }, [])
 
   // ── Web Speech API: Speech Synthesis (voice output) ────────
-  const speakText = useCallback((text) => {
-    if (!voiceEnabled || !window.speechSynthesis) return
+  const speakText = useCallback((text, msgIndex = null) => {
+    if (!window.speechSynthesis) return
 
     // Cancel any ongoing speech
     window.speechSynthesis.cancel()
@@ -128,20 +178,35 @@ export default function ChatWidget({ onNewActivity, initialAgent = 'auto', fullH
     utterance.pitch = 1.0
     utterance.volume = 1.0
 
-    utterance.onstart = () => setIsSpeaking(true)
-    utterance.onend = () => setIsSpeaking(false)
-    utterance.onerror = () => setIsSpeaking(false)
+    utterance.onstart = () => {
+      setIsSpeaking(true)
+      setSpeakingMsgIndex(msgIndex)
+    }
+    utterance.onend = () => {
+      setIsSpeaking(false)
+      setSpeakingMsgIndex(null)
+    }
+    utterance.onerror = () => {
+      setIsSpeaking(false)
+      setSpeakingMsgIndex(null)
+    }
 
     window.speechSynthesis.speak(utterance)
-  }, [voiceEnabled])
+  }, [])
+
+  /** Stop any currently playing TTS audio immediately */
+  const stopSpeaking = useCallback(() => {
+    window.speechSynthesis?.cancel()
+    setIsSpeaking(false)
+    setSpeakingMsgIndex(null)
+  }, [])
 
   const toggleVoiceOutput = useCallback(() => {
     if (isSpeaking) {
-      window.speechSynthesis?.cancel()
-      setIsSpeaking(false)
+      stopSpeaking()
     }
     setVoiceEnabled(prev => !prev)
-  }, [isSpeaking])
+  }, [isSpeaking, stopSpeaking])
 
   // ── Agent display data ─────────────────────────────────────
   const currentAgentInfo = AGENT_OPTIONS.find(a => a.key === selectedAgent) || AGENT_OPTIONS[0]
@@ -192,7 +257,8 @@ export default function ChatWidget({ onNewActivity, initialAgent = 'auto', fullH
 
       // Read response aloud if voice output is enabled
       if (voiceEnabled) {
-        speakText(data.response)
+        // msgIndex = current messages count + 1 (user msg) + 1 (this new agent msg) - 1
+        speakText(data.response, messages.length + 1)
       }
 
       // Notify parent to refresh activity feed
@@ -329,14 +395,51 @@ export default function ChatWidget({ onNewActivity, initialAgent = 'auto', fullH
 
               {/* Chat Bubble */}
               <div
-                className={`rounded-2xl px-4.5 py-3 text-sm leading-relaxed whitespace-pre-wrap ${
+                className={`rounded-2xl px-4 py-3 text-sm leading-relaxed ${
                   msg.role === 'user'
                     ? 'bg-blue-600 text-white rounded-br-md shadow-md shadow-blue-600/20 font-medium'
                     : 'bg-white text-slate-800 rounded-bl-md shadow-sm border border-slate-200/80'
                 }`}
               >
-                {msg.content}
+                {/* Render markdown instead of raw text */}
+                <div className={`prose-chat ${msg.role === 'user' ? 'prose-chat-user' : ''}`}>
+                  <ReactMarkdown
+                    remarkPlugins={[remarkGfm]}
+                    components={msg.role === 'user' ? userMarkdownComponents : markdownComponents}
+                  >
+                    {msg.content}
+                  </ReactMarkdown>
+                </div>
               </div>
+
+              {/* Per-message audio controls — only for assistant messages */}
+              {msg.role === 'assistant' && i > 0 && (
+                <div className="flex items-center gap-1.5 mt-1 ml-1">
+                  {speakingMsgIndex === i ? (
+                    <button
+                      onClick={stopSpeaking}
+                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold
+                                 bg-red-50 text-red-500 border border-red-200 hover:bg-red-100 transition-all
+                                 cursor-pointer active:scale-95"
+                      title="Stop reading"
+                    >
+                      <Square className="w-2.5 h-2.5 fill-current" />
+                      Stop
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => speakText(msg.content, i)}
+                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold
+                                 bg-slate-50 text-slate-400 border border-slate-200 hover:bg-slate-100 hover:text-slate-600
+                                 transition-all cursor-pointer active:scale-95"
+                      title="Read aloud"
+                    >
+                      <Play className="w-2.5 h-2.5 fill-current" />
+                      Listen
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
           </div>
         ))}
@@ -359,6 +462,26 @@ export default function ChatWidget({ onNewActivity, initialAgent = 'auto', fullH
 
         <div ref={bottomRef} />
       </div>
+
+      {/* Active TTS Banner — appears when audio is playing */}
+      {isSpeaking && (
+        <div className="px-4 py-2 bg-emerald-50 border-t border-emerald-200 flex items-center justify-between flex-shrink-0 animate-slide-up">
+          <div className="flex items-center gap-2">
+            <Volume2 className="w-4 h-4 text-emerald-600 animate-pulse" />
+            <span className="text-xs font-bold text-emerald-700">HIVE is speaking…</span>
+          </div>
+          <button
+            onClick={stopSpeaking}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold
+                       bg-red-500 text-white hover:bg-red-600 transition-all
+                       cursor-pointer active:scale-95 shadow-sm shadow-red-500/20"
+            id="stop-audio-btn"
+          >
+            <Square className="w-3 h-3 fill-current" />
+            Stop Audio
+          </button>
+        </div>
+      )}
 
       {/* Message Input Bar with Voice */}
       <div className="p-3.5 border-t border-slate-200 bg-white flex-shrink-0">
@@ -412,20 +535,12 @@ export default function ChatWidget({ onNewActivity, initialAgent = 'auto', fullH
         </div>
 
         {/* Voice status indicators */}
-        {(isListening || isSpeaking) && (
+        {isListening && (
           <div className="flex items-center gap-2 mt-2 px-1">
-            {isListening && (
-              <span className="inline-flex items-center gap-1.5 text-[11px] font-bold text-red-500">
-                <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
-                Listening…
-              </span>
-            )}
-            {isSpeaking && (
-              <span className="inline-flex items-center gap-1.5 text-[11px] font-bold text-emerald-500">
-                <Volume2 className="w-3 h-3 animate-pulse" />
-                Speaking…
-              </span>
-            )}
+            <span className="inline-flex items-center gap-1.5 text-[11px] font-bold text-red-500">
+              <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+              Listening…
+            </span>
           </div>
         )}
       </div>

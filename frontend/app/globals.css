@@ -417,3 +417,77 @@ body {
   pointer-events: none;
 }
 
+/* ── Chat Markdown Prose Styles ─────────────────────────── */
+
+.prose-chat {
+  font-size: 0.875rem;
+  line-height: 1.6;
+  word-break: break-word;
+}
+
+.prose-chat p {
+  margin-bottom: 0.5rem;
+}
+
+.prose-chat p:last-child {
+  margin-bottom: 0;
+}
+
+.prose-chat ul,
+.prose-chat ol {
+  margin: 0.25rem 0 0.5rem 1.25rem;
+}
+
+.prose-chat li {
+  margin-bottom: 0.15rem;
+}
+
+.prose-chat li::marker {
+  color: #94a3b8;
+}
+
+.prose-chat h1,
+.prose-chat h2,
+.prose-chat h3 {
+  line-height: 1.3;
+}
+
+.prose-chat pre {
+  border-radius: 0.5rem;
+  margin: 0.5rem 0;
+}
+
+.prose-chat blockquote {
+  border-left: 3px solid #60a5fa;
+  padding-left: 0.75rem;
+  margin: 0.5rem 0;
+  color: #64748b;
+  font-style: italic;
+}
+
+.prose-chat table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 0.75rem;
+}
+
+.prose-chat hr {
+  border: none;
+  border-top: 1px solid #e2e8f0;
+  margin: 0.75rem 0;
+}
+
+/* User message prose — light text on blue */
+.prose-chat-user li::marker {
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.prose-chat-user blockquote {
+  border-left-color: rgba(255, 255, 255, 0.4);
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.prose-chat-user hr {
+  border-top-color: rgba(255, 255, 255, 0.2);
+}
+
